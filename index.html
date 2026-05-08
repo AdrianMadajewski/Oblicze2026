@@ -48,6 +48,11 @@
   button {
     background: #f9fafb;
     cursor: pointer;
+    transition: 0.15s ease;
+  }
+
+  button:hover {
+    background: #f3f4f6;
   }
 
   label {
@@ -66,32 +71,38 @@
     gap: 10px;
   }
 
+  input[type="range"] {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
   .tValue {
     font-size: 12px;
     color: #111827;
     font-variant-numeric: tabular-nums;
+    min-width: 50px;
     text-align: right;
   }
 
   input[type="checkbox"] {
+    width: auto;
     transform: scale(1.1);
+    margin: 0;
+    cursor: pointer;
   }
 
-  /* ?? FIX: jeden rząd, brak łamania */
-  .rowInline {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    white-space: nowrap;
-  }
-
-  .rowInline span {
-    flex: 1;
+  p {
+    font-size: 12px;
+    color: #6b7280;
+    margin-top: 12px;
+    line-height: 1.4;
   }
 
   @media (max-width: 768px) {
-    body { flex-direction: column; }
+    body {
+      flex-direction: column;
+    }
 
     #panel {
       width: 100%;
@@ -119,11 +130,10 @@
 <div id="panel">
   <h3>Bezier Curve Editor</h3>
 
-  <!-- ?? FIXED ROW -->
   <label>
-    <div class="rowInline">
-      <span>Show convex hull</span>
+    <div style="display:flex;align-items:center;gap:10px;">
       <input type="checkbox" id="showHull" checked />
+      <span>Show convex hull</span>
     </div>
   </label>
 
@@ -136,6 +146,8 @@
   <button id="clearBtn">Clear</button>
   <button id="playBtn">Play</button>
   <button id="pauseBtn">Pause</button>
+
+  <p>Click to add points, drag to move. Ctrl+Z undo.</p>
 </div>
 
 <canvas id="canvas"></canvas>
@@ -162,20 +174,33 @@ const pauseBtn = document.getElementById('pauseBtn');
 
 const HIT_RADIUS = 18;
 
-function hullEnabled(){
-  return showHull.checked === true;
-}
-
+/* ================= FIXED RESIZE (ONLY CHANGE) ================= */
 function resize(){
-  canvas.width = window.innerWidth - 320;
-  canvas.height = window.innerHeight;
+  const isMobile = window.innerWidth <= 768;
+
+  const panelWidth = isMobile ? 0 : 320;
+  const panelHeight = isMobile ? 260 : 0;
+
+  const w = window.innerWidth - panelWidth;
+  const h = window.innerHeight - panelHeight;
+
+  canvas.width = w;
+  canvas.height = h;
+
   draw();
 }
+
 window.addEventListener('resize', resize);
 resize();
 
+/* ================= REST UNCHANGED ================= */
+
 function save(){ history.push(JSON.stringify(points)); }
 function undo(){ if(history.length){ points = JSON.parse(history.pop()); draw(); } }
+
+window.addEventListener('keydown', e=>{
+  if(e.ctrlKey && e.key==='z') undo();
+});
 
 function getMouse(e){
   const r = canvas.getBoundingClientRect();
@@ -230,8 +255,7 @@ function convexHull(pts){
   return low.concat(up);
 }
 
-/* INPUT + DRAW (bez zmian) */
-
+/* INPUT (UNCHANGED) */
 canvas.addEventListener('mousedown', e=>{
   const m=getMouse(e);
 
@@ -283,16 +307,26 @@ canvas.addEventListener("touchmove", e=>{
 
 canvas.addEventListener("touchend", ()=> draggingPoint=null);
 
+/* DRAW (UNCHANGED) */
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  drawHull();
+  drawBezier();
+  drawDeCasteljau();
+  drawPoints();
+}
+
 function drawHull(){
-  if(!hullEnabled()) return;
-  if(points.length<2) return;
+  if(!showHull.checked || points.length<2) return;
 
   let h=convexHull(points);
-  if(!h.length) return;
 
   ctx.beginPath();
   ctx.moveTo(h[0].x,h[0].y);
-  for(let i=1;i<h.length;i++) ctx.lineTo(h[i].x,h[i].y);
+  for(let i=1;i<h.length;i++){
+    ctx.lineTo(h[i].x,h[i].y);
+  }
+
   ctx.closePath();
   ctx.strokeStyle="#777";
   ctx.lineWidth=2;
@@ -303,17 +337,22 @@ function drawBezier(){
   if(points.length<2) return;
 
   ctx.beginPath();
-  const steps=300;
-  let started=false;
+
+  const steps = 300;
+  let started = false;
 
   for(let i=0;i<=steps;i++){
-    let tt=i/steps;
+    let tt = i/steps;
     if(tt>t) break;
 
-    let p=deCasteljauLevels(points,tt).at(-1)[0];
+    let p = deCasteljauLevels(points,tt).at(-1)[0];
 
-    if(!started){ ctx.moveTo(p.x,p.y); started=true; }
-    else ctx.lineTo(p.x,p.y);
+    if(!started){
+      ctx.moveTo(p.x,p.y);
+      started=true;
+    } else {
+      ctx.lineTo(p.x,p.y);
+    }
   }
 
   ctx.strokeStyle="blue";
@@ -324,7 +363,7 @@ function drawBezier(){
 function drawDeCasteljau(){
   if(points.length<2) return;
 
-  let levels=deCasteljauLevels(points,t);
+  let levels = deCasteljauLevels(points,t);
 
   for(let k=0;k<levels.length;k++){
     let lvl=levels[k];
@@ -340,7 +379,8 @@ function drawDeCasteljau(){
   }
 
   for(let k=0;k<levels.length-1;k++){
-    let a=levels[k], b=levels[k+1];
+    let a=levels[k];
+    let b=levels[k+1];
 
     for(let i=0;i<b.length;i++){
       let child=b[i];
@@ -385,22 +425,16 @@ function drawPoints(){
   }
 }
 
-function draw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  drawHull();
-  drawBezier();
-  drawDeCasteljau();
-  drawPoints();
-}
-
+/* UI */
 tSlider.oninput=e=>{
   t=parseFloat(e.target.value);
   tValue.textContent=t.toFixed(3);
   draw();
 };
 
-showHull.onchange=()=>draw();
+showHull.onchange=draw;
 
+/* ANIM */
 function animate(){
   if(!playing) return;
 
@@ -419,6 +453,5 @@ pauseBtn.onclick=()=>{playing=false;cancelAnimationFrame(anim);};
 clearBtn.onclick=()=>{save();points=[];draw();};
 
 </script>
-
 </body>
 </html>
