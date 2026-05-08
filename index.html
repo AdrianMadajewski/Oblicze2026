@@ -29,7 +29,6 @@
     color: #111827;
   }
 
-  /* wrapper (ONLY ADDITION) */
   #canvasWrap {
     flex: 1;
     position: relative;
@@ -44,7 +43,6 @@
     display: block;
   }
 
-  /* invisible input layer (ONLY ADDITION) */
   #hitLayer {
     position: absolute;
     inset: 0;
@@ -86,18 +84,18 @@
     gap: 10px;
   }
 
-  input[type="range"] {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-  }
-
   .tValue {
     font-size: 12px;
     color: #111827;
     font-variant-numeric: tabular-nums;
     min-width: 50px;
     text-align: right;
+  }
+
+  input[type="range"] {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
   }
 
   input[type="checkbox"] {
@@ -115,9 +113,7 @@
   }
 
   @media (max-width: 768px) {
-    body {
-      flex-direction: column;
-    }
+    body { flex-direction: column; }
 
     #panel {
       width: 100%;
@@ -159,13 +155,13 @@
   </label>
 
   <button id="clearBtn">Clear</button>
-  <button id="playBtn">Play</button>
-  <button id="pauseBtn">Pause</button>
+  <button id="toggleBtn">Play</button>
+  <button id="resetBtn">Reset</button>
+  <button id="fullBtn">Full curve</button>
 
   <p>Click to add points, drag to move. Ctrl+Z undo.</p>
 </div>
 
-<!-- ONLY CHANGE -->
 <div id="canvasWrap">
   <canvas id="canvas"></canvas>
   <div id="hitLayer"></div>
@@ -182,19 +178,20 @@ let draggingPoint = null;
 
 let t = 0;
 let playing = false;
-let anim;
+let anim = null;
 
 const showHull = document.getElementById('showHull');
 const tSlider = document.getElementById('tSlider');
 const tValue = document.getElementById('tValue');
 
+const toggleBtn = document.getElementById('toggleBtn');
+const resetBtn = document.getElementById('resetBtn');
 const clearBtn = document.getElementById('clearBtn');
-const playBtn = document.getElementById('playBtn');
-const pauseBtn = document.getElementById('pauseBtn');
+const fullBtn = document.getElementById('fullBtn');
 
 const HIT_RADIUS = 18;
 
-/* ================= RESIZE (UNCHANGED LOGIC, FIXED LAYOUT SAFE) ================= */
+/* resize */
 function resize(){
   const r = canvas.getBoundingClientRect();
   canvas.width = r.width;
@@ -204,29 +201,32 @@ function resize(){
 window.addEventListener('resize', resize);
 resize();
 
-/* ================= INPUT POSITION ================= */
+/* utils */
 function getPos(e){
   const r = canvas.getBoundingClientRect();
-  return {
-    x: e.clientX - r.left,
-    y: e.clientY - r.top
-  };
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
 }
 
-/* ================= CORE ================= */
 function save(){ history.push(JSON.stringify(points)); }
-function undo(){ if(history.length){ points = JSON.parse(history.pop()); draw(); } }
+
+function undo(){
+  if(history.length){
+    points = JSON.parse(history.pop());
+    draw();
+  }
+}
 
 window.addEventListener('keydown', e=>{
-  if(e.ctrlKey && e.key==='z') undo();
+  if(e.ctrlKey && e.key === 'z') undo();
 });
 
-function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
+function dist(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
 
 function lerp(a,b,t){
-  return {x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t};
+  return { x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t };
 }
 
+/* de Casteljau */
 function deCasteljauLevels(pts,t){
   let levels=[pts];
   let cur=pts;
@@ -242,20 +242,21 @@ function deCasteljauLevels(pts,t){
   return levels;
 }
 
+/* convex hull */
 function convexHull(pts){
   let s=[...pts].sort((a,b)=>a.x-b.x||a.y-b.y);
   let cross=(o,a,b)=>(a.x-o.x)*(b.y-o.y)-(a.y-o.y)*(b.x-o.x);
 
-  let low=[],up=[];
+  let low=[], up=[];
 
   for(let p of s){
-    while(low.length>1&&cross(low.at(-2),low.at(-1),p)<=0)low.pop();
+    while(low.length>1 && cross(low.at(-2),low.at(-1),p)<=0) low.pop();
     low.push(p);
   }
 
   for(let i=s.length-1;i>=0;i--){
     let p=s[i];
-    while(up.length>1&&cross(up.at(-2),up.at(-1),p)<=0)up.pop();
+    while(up.length>1 && cross(up.at(-2),up.at(-1),p)<=0) up.pop();
     up.push(p);
   }
 
@@ -263,8 +264,7 @@ function convexHull(pts){
   return low.concat(up);
 }
 
-/* ================= INPUT (FIXED VIA HIT LAYER) ================= */
-
+/* input */
 hitLayer.addEventListener('pointerdown', e=>{
   const m = getPos(e);
 
@@ -290,8 +290,7 @@ hitLayer.addEventListener('pointermove', e=>{
 hitLayer.addEventListener('pointerup', ()=> draggingPoint=null);
 hitLayer.addEventListener('pointercancel', ()=> draggingPoint=null);
 
-/* ================= DRAW ================= */
-
+/* draw */
 function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
   drawHull();
@@ -303,13 +302,11 @@ function draw(){
 function drawHull(){
   if(!showHull.checked || points.length<2) return;
 
-  let h=convexHull(points);
+  let h = convexHull(points);
 
   ctx.beginPath();
   ctx.moveTo(h[0].x,h[0].y);
-  for(let i=1;i<h.length;i++){
-    ctx.lineTo(h[i].x,h[i].y);
-  }
+  for(let i=1;i<h.length;i++) ctx.lineTo(h[i].x,h[i].y);
 
   ctx.closePath();
   ctx.strokeStyle="#777";
@@ -318,75 +315,84 @@ function drawHull(){
 }
 
 function drawBezier(){
-  if(points.length<2) return;
+  if(points.length < 2) return;
+
+  // t = 0 › nic nie rysuj
+  if(t <= 0) return;
+
+  const steps = 400;
 
   ctx.beginPath();
 
-  const steps = 300;
-  let started = false;
+  let first = true;
 
-  for(let i=0;i<=steps;i++){
-    let tt = i/steps;
-    if(tt>t) break;
+  for(let i = 0; i <= steps; i++){
+    let tt = i / steps;
 
-    let p = deCasteljauLevels(points,tt).at(-1)[0];
+    // ograniczenie zakresu tylko dla animacji
+    if(t < 1 && tt > t) break;
 
-    if(!started){
-      ctx.moveTo(p.x,p.y);
-      started=true;
+    const p = deCasteljauLevels(points, tt).at(-1)[0];
+
+    if(first){
+      ctx.moveTo(p.x, p.y);
+      first = false;
     } else {
-      ctx.lineTo(p.x,p.y);
+      ctx.lineTo(p.x, p.y);
     }
   }
 
-  ctx.strokeStyle="blue";
-  ctx.lineWidth=4;
+  ctx.strokeStyle = "blue";
+  ctx.lineWidth = 4;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
   ctx.stroke();
 }
 
 function drawDeCasteljau(){
-  if(points.length<2) return;
+  if(points.length < 2) return;
+  if(t <= 0 || t >= 1) return;
 
-  let levels = deCasteljauLevels(points,t);
+  let levels = deCasteljauLevels(points, t);
 
-  for(let k=0;k<levels.length;k++){
-    let lvl=levels[k];
+  for(let k = 0; k < levels.length; k++){
+    let lvl = levels[k];
 
     ctx.beginPath();
-    for(let i=0;i<lvl.length;i++){
-      if(i===0) ctx.moveTo(lvl[i].x,lvl[i].y);
-      else ctx.lineTo(lvl[i].x,lvl[i].y);
+    for(let i = 0; i < lvl.length; i++){
+      if(i === 0) ctx.moveTo(lvl[i].x, lvl[i].y);
+      else ctx.lineTo(lvl[i].x, lvl[i].y);
     }
-    ctx.strokeStyle="rgba(0,0,0,0.3)";
-    ctx.lineWidth=1;
+    ctx.strokeStyle = "rgba(0,0,0,0.3)";
+    ctx.lineWidth = 1;
     ctx.stroke();
   }
 
-  for(let k=0;k<levels.length-1;k++){
-    let a=levels[k];
-    let b=levels[k+1];
+  for(let k = 0; k < levels.length - 1; k++){
+    let a = levels[k];
+    let b = levels[k + 1];
 
-    for(let i=0;i<b.length;i++){
-      let child=b[i];
+    for(let i = 0; i < b.length; i++){
+      let child = b[i];
 
       ctx.beginPath();
-      ctx.moveTo(a[i].x,a[i].y);
-      ctx.lineTo(child.x,child.y);
-      ctx.strokeStyle="rgba(0,0,0,0.6)";
-      ctx.lineWidth=2;
+      ctx.moveTo(a[i].x, a[i].y);
+      ctx.lineTo(child.x, child.y);
+      ctx.strokeStyle = "rgba(0,0,0,0.6)";
+      ctx.lineWidth = 2;
       ctx.stroke();
 
       ctx.beginPath();
-      ctx.arc(child.x,child.y,5,0,Math.PI*2);
-      ctx.fillStyle="rgba(0,0,0,0.85)";
+      ctx.arc(child.x, child.y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(0,0,0,0.85)";
       ctx.fill();
     }
   }
 
-  let p=levels.at(-1)[0];
+  let p = levels.at(-1)[0];
   ctx.beginPath();
-  ctx.arc(p.x,p.y,8,0,Math.PI*2);
-  ctx.fillStyle="blue";
+  ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+  ctx.fillStyle = "blue";
   ctx.fill();
 }
 
@@ -418,23 +424,62 @@ tSlider.oninput=e=>{
 
 showHull.onchange=draw;
 
-/* ANIM */
+/* animation */
 function animate(){
   if(!playing) return;
 
-  t+=0.002;
-  if(t>1) t=0;
+  t += 0.002;
+  if(t > 1) t = 0;
 
-  tSlider.value=t;
-  tValue.textContent=t.toFixed(3);
+  tSlider.value = t;
+  tValue.textContent = t.toFixed(3);
 
   draw();
-  anim=requestAnimationFrame(animate);
+  anim = requestAnimationFrame(animate);
 }
 
-playBtn.onclick=()=>{playing=true;animate();};
-pauseBtn.onclick=()=>{playing=false;cancelAnimationFrame(anim);};
-clearBtn.onclick=()=>{save();points=[];draw();};
+toggleBtn.onclick = () => {
+  playing = !playing;
+
+  if(playing){
+    toggleBtn.textContent = "Pause";
+    animate();
+  } else {
+    toggleBtn.textContent = "Play";
+    cancelAnimationFrame(anim);
+  }
+};
+
+resetBtn.onclick = () => {
+  t = 0;
+  tSlider.value = 0;
+  tValue.textContent = "0.000";
+
+  playing = false;
+  toggleBtn.textContent = "Play";
+  cancelAnimationFrame(anim);
+
+  draw();
+};
+
+fullBtn.onclick = () => {
+  t = 1;
+
+  tSlider.value = 1;
+  tValue.textContent = "1.000";
+
+  playing = false;
+  toggleBtn.textContent = "Play";
+  cancelAnimationFrame(anim);
+
+  draw();
+};
+
+clearBtn.onclick = () => {
+  save();
+  points = [];
+  draw();
+};
 
 </script>
 </body>
