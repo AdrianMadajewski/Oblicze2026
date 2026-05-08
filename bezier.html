@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Bezier Curve Editor</title>
+
+<style>
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    display: flex;
+    height: 100vh;
+    background: #f5f6f8;
+  }
+
+  #panel {
+    width: 320px;
+    padding: 16px;
+    border-right: 1px solid #e5e7eb;
+    box-sizing: border-box;
+    background: #ffffff;
+  }
+
+  #panel h3 {
+    margin: 0 0 12px 0;
+    font-weight: 600;
+    font-size: 18px;
+    color: #111827;
+  }
+
+  #canvas {
+    flex: 1;
+    cursor: crosshair;
+    background: #ffffff;
+    touch-action: none;
+  }
+
+  button, input {
+    width: 100%;
+    margin-top: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+    font-size: 14px;
+  }
+
+  button {
+    background: #f9fafb;
+    cursor: pointer;
+    transition: 0.15s ease;
+  }
+
+  button:hover {
+    background: #f3f4f6;
+  }
+
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 12px;
+    font-size: 14px;
+    color: #374151;
+  }
+
+  .sliderRow {
+    display: grid;
+    grid-template-columns: 20px 1fr 60px;
+    align-items: center;
+    gap: 10px;
+  }
+
+  input[type="range"] {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  .tValue {
+    font-size: 12px;
+    color: #111827;
+    font-variant-numeric: tabular-nums;
+    min-width: 50px;
+    text-align: right;
+  }
+
+  input[type="checkbox"] {
+    width: auto;
+    transform: scale(1.1);
+    margin: 0;
+    cursor: pointer;
+  }
+
+  p {
+    font-size: 12px;
+    color: #6b7280;
+    margin-top: 12px;
+    line-height: 1.4;
+  }
+</style>
+</head>
+
+<body>
+
+<div id="panel">
+  <h3>Bezier Curve Editor</h3>
+
+  <label>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <input type="checkbox" id="showHull" checked />
+      <span>Show convex hull</span>
+    </div>
+  </label>
+
+  <label class="sliderRow">
+    <span>t</span>
+    <input type="range" id="tSlider" min="0" max="1" step="0.001" value="0" />
+    <span class="tValue" id="tValue">0.000</span>
+  </label>
+
+  <button id="clearBtn">Clear</button>
+  <button id="playBtn">Play</button>
+  <button id="pauseBtn">Pause</button>
+
+  <p>Click to add points, drag to move. Ctrl+Z undo.</p>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+let points = [];
+let history = [];
+let draggingPoint = null;
+
+let t = 0;
+let playing = false;
+let anim;
+
+const showHull = document.getElementById('showHull');
+const tSlider = document.getElementById('tSlider');
+const tValue = document.getElementById('tValue');
+
+const clearBtn = document.getElementById('clearBtn');
+const playBtn = document.getElementById('playBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+
+const HIT_RADIUS = 18;
+
+function resize(){
+  canvas.width = window.innerWidth - 320;
+  canvas.height = window.innerHeight;
+  draw();
+}
+window.addEventListener('resize', resize);
+resize();
+
+function save(){ history.push(JSON.stringify(points)); }
+function undo(){ if(history.length){ points = JSON.parse(history.pop()); draw(); } }
+
+window.addEventListener('keydown', e=>{
+  if(e.ctrlKey && e.key==='z') undo();
+});
+
+function getMouse(e){
+  const r = canvas.getBoundingClientRect();
+  return {x:e.clientX-r.left,y:e.clientY-r.top};
+}
+
+function getTouch(e){
+  const r = canvas.getBoundingClientRect();
+  const t = e.touches[0];
+  return { x: t.clientX - r.left, y: t.clientY - r.top };
+}
+
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
+
+function lerp(a,b,t){
+  return {x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t};
+}
+
+function deCasteljauLevels(pts,t){
+  let levels=[pts];
+  let cur=pts;
+
+  while(cur.length>1){
+    let next=[];
+    for(let i=0;i<cur.length-1;i++){
+      next.push(lerp(cur[i],cur[i+1],t));
+    }
+    levels.push(next);
+    cur=next;
+  }
+  return levels;
+}
+
+function convexHull(pts){
+  let s=[...pts].sort((a,b)=>a.x-b.x||a.y-b.y);
+  let cross=(o,a,b)=>(a.x-o.x)*(b.y-o.y)-(a.y-o.y)*(b.x-o.x);
+
+  let low=[],up=[];
+
+  for(let p of s){
+    while(low.length>1&&cross(low.at(-2),low.at(-1),p)<=0)low.pop();
+    low.push(p);
+  }
+
+  for(let i=s.length-1;i>=0;i--){
+    let p=s[i];
+    while(up.length>1&&cross(up.at(-2),up.at(-1),p)<=0)up.pop();
+    up.push(p);
+  }
+
+  up.pop(); low.pop();
+  return low.concat(up);
+}
+
+/* ---------------- INPUT (MOUSE) ---------------- */
+
+canvas.addEventListener('mousedown', e=>{
+  const m=getMouse(e);
+
+  for(let i=0;i<points.length;i++){
+    if(dist(points[i],m)<HIT_RADIUS){
+      draggingPoint=i;
+      save();
+      return;
+    }
+  }
+
+  save();
+  points.push(m);
+  draw();
+});
+
+canvas.addEventListener('mousemove', e=>{
+  if(draggingPoint!==null){
+    points[draggingPoint]=getMouse(e);
+    draw();
+  }
+});
+
+canvas.addEventListener('mouseup', ()=> draggingPoint=null);
+
+/* ---------------- INPUT (TOUCH) ---------------- */
+
+canvas.addEventListener("touchstart", e => {
+  e.preventDefault();
+  const m = getTouch(e);
+
+  for (let i = 0; i < points.length; i++) {
+    if (dist(points[i], m) < HIT_RADIUS) {
+      draggingPoint = i;
+      save();
+      return;
+    }
+  }
+
+  save();
+  points.push(m);
+  draw();
+}, { passive: false });
+
+canvas.addEventListener("touchmove", e => {
+  if (draggingPoint === null) return;
+  e.preventDefault();
+
+  points[draggingPoint] = getTouch(e);
+  draw();
+}, { passive: false });
+
+canvas.addEventListener("touchend", () => {
+  draggingPoint = null;
+});
+
+/* ---------------- DRAWING ---------------- */
+
+function drawHull(){
+  if(!showHull.checked || points.length<2) return;
+
+  let h=convexHull(points);
+
+  ctx.beginPath();
+  ctx.moveTo(h[0].x,h[0].y);
+  for(let i=1;i<h.length;i++){
+    ctx.lineTo(h[i].x,h[i].y);
+  }
+
+  ctx.closePath();
+  ctx.strokeStyle="#777";
+  ctx.lineWidth=2;
+  ctx.stroke();
+}
+
+function drawBezier(){
+  if(points.length<2) return;
+
+  ctx.beginPath();
+
+  const steps = 300;
+  let started = false;
+
+  for(let i=0;i<=steps;i++){
+    let tt = i/steps;
+    if(tt>t) break;
+
+    let p = deCasteljauLevels(points,tt).at(-1)[0];
+
+    if(!started){
+      ctx.moveTo(p.x,p.y);
+      started=true;
+    } else {
+      ctx.lineTo(p.x,p.y);
+    }
+  }
+
+  ctx.strokeStyle="blue";
+  ctx.lineWidth=4;
+  ctx.stroke();
+}
+
+function drawDeCasteljau(){
+  if(points.length<2) return;
+
+  let levels = deCasteljauLevels(points,t);
+
+  for(let k=0;k<levels.length;k++){
+    let lvl=levels[k];
+
+    ctx.beginPath();
+    for(let i=0;i<lvl.length;i++){
+      if(i===0) ctx.moveTo(lvl[i].x,lvl[i].y);
+      else ctx.lineTo(lvl[i].x,lvl[i].y);
+    }
+    ctx.strokeStyle="rgba(0,0,0,0.3)";
+    ctx.lineWidth=1;
+    ctx.stroke();
+  }
+
+  for(let k=0;k<levels.length-1;k++){
+    let a=levels[k];
+    let b=levels[k+1];
+
+    for(let i=0;i<b.length;i++){
+      let child=b[i];
+
+      ctx.beginPath();
+      ctx.moveTo(a[i].x,a[i].y);
+      ctx.lineTo(child.x,child.y);
+      ctx.strokeStyle="rgba(0,0,0,0.6)";
+      ctx.lineWidth=2;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(child.x,child.y,5,0,Math.PI*2);
+      ctx.fillStyle="rgba(0,0,0,0.85)";
+      ctx.fill();
+    }
+  }
+
+  let p=levels.at(-1)[0];
+  ctx.beginPath();
+  ctx.arc(p.x,p.y,8,0,Math.PI*2);
+  ctx.fillStyle="blue";
+  ctx.fill();
+}
+
+function drawPoints(){
+  for(let i=0;i<points.length;i++){
+    let p=points[i];
+
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,10,0,Math.PI*2);
+    ctx.fillStyle="red";
+    ctx.fill();
+
+    ctx.strokeStyle="darkred";
+    ctx.lineWidth=3;
+    ctx.stroke();
+
+    ctx.font="bold 22px Arial";
+    ctx.fillStyle="black";
+    ctx.fillText("P"+i,p.x+10,p.y-10);
+  }
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  drawHull();
+  drawBezier();
+  drawDeCasteljau();
+  drawPoints();
+}
+
+/* ---------------- SLIDER ---------------- */
+
+tSlider.oninput = e=>{
+  t = parseFloat(e.target.value);
+  tValue.textContent = t.toFixed(3);
+  draw();
+};
+
+/* ---------------- ANIMATION ---------------- */
+
+function animate(){
+  if(!playing) return;
+
+  t += 0.002;
+  if(t>1) t=0;
+
+  tSlider.value = t;
+  tValue.textContent = t.toFixed(3);
+
+  draw();
+  anim = requestAnimationFrame(animate);
+}
+
+playBtn.onclick=()=>{ playing=true; animate(); };
+pauseBtn.onclick=()=>{ playing=false; cancelAnimationFrame(anim); };
+clearBtn.onclick=()=>{ save(); points=[]; draw(); };
+showHull.onchange = () => draw();
+
+</script>
+
+</body>
+</html>
